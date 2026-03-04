@@ -1,42 +1,61 @@
 'use strict';
 /**
- * Prescription Validation Engine
+ * @file services/prescriptionValidation.js
+ * @description Pre-intake prescription validation engine.
  *
- * Regulatory basis:
- *  - Narcotic Control Regulations (NCR), SOR/2012-230, s.31
- *  - Food and Drugs Act, R.S.C. 1985, c. F-27, s.29.1
- *  - NAPRA Model Standards of Practice (2022)
- *  - Provincial pharmacy acts (ON: DPRA; BC: PODSA; AB: Pharmacy and Drug Act)
- *  - Health Canada — Guidance on Controlled Substances (2023)
+ * Called by technicianIntake() BEFORE any DB write.  Catches legal and clinical
+ * problems early so the technician can resolve them with the prescriber/patient
+ * without creating a partial record in the system.
  *
- * Validates a raw prescription object before it enters the workflow.
- * Returns { valid: bool, errors: string[], warnings: string[] }
+ * Returns { valid: boolean, errors: string[], warnings: string[] }.
+ *  - errors:   hard failures — prescription MUST NOT be dispensed
+ *  - warnings: soft flags — pharmacist must review, but not automatic rejection
+ *
+ * ─── Regulatory basis ────────────────────────────────────────────────────────
+ *  NCR s.31 — mandatory elements of a narcotic prescription:
+ *    (a) patient name; (b) patient address; (c) drug name and strength;
+ *    (d) quantity (in words or figures); (e) dosage directions;
+ *    (f) prescriber name and address; (g) prescriber handwritten signature;
+ *    (h) date of issue
+ *  NCR s.31(2) — verbal, fax, and electronic narcotic Rxs PROHIBITED
+ *  NCR s.31(3) — narcotic Rxs CANNOT be refilled; new Rx required
+ *  Food and Drugs Act s.29.1 — patient counselling obligation
+ *  NAPRA Model Standards s.3.0 — technician intake checklist
+ *  Health Canada Guidance on Controlled Substances (2023)
+ *  Provincial pharmacy acts (ON: DPRA; BC: PODSA; AB: Pharmacy and Drug Act)
+ * ────────────────────────────────────────────────────────────────────────────
  */
 
 const pool = require('../config/database');
 
-// Narcotic Control Regulations s.31 — mandatory fields for narcotic prescriptions
+// NCR s.31(1) — fields that MUST appear on a narcotic prescription.
+// If any are missing the Rx is invalid and cannot be accepted (not even by the pharmacist).
+// Field names match the flat rx object passed by the intake API; related records
+// (patient, prescriber) are also checked since some fields may come from there.
 const NCR_REQUIRED_FIELDS = [
   'patient_name',
-  'patient_address',       // NCR s.31(1)(b)
+  'patient_address',       // NCR s.31(1)(b) — patient's address required
   'drug_name',
   'drug_strength',
-  'quantity_prescribed',   // NCR s.31(1)(d) — must be in words OR figures
+  'quantity_prescribed',   // NCR s.31(1)(d) — must be stated in words OR figures
   'directions',
   'prescriber_name',
-  'prescriber_address',    // NCR s.31(1)(f)
-  'prescriber_signature',  // NCR s.31(1)(g) — MUST be handwritten original
+  'prescriber_address',    // NCR s.31(1)(f) — prescriber's address required
+  'prescriber_signature',  // NCR s.31(1)(g) — MUST be an original handwritten signature
   'written_date',
 ];
 
-// Maximum legal supply (days) per drug class — Health Canada guidelines
+// Health Canada maximum days-supply guidelines by CDSA drug schedule.
+// Exceeding these limits is a hard error that prevents dispensing.
+// Source: Health Canada — Guidance on Controlled Substances (2023) and
+//         provincial pharmacy standards.
 const MAX_SUPPLY_DAYS = {
-  NOT_CONTROLLED:    365,
-  SCHEDULE_I:         30,  // narcotics — NCR limits
-  SCHEDULE_II:        30,
-  SCHEDULE_III:       90,
-  SCHEDULE_IV:        30,  // benzodiazepines — targeted substances
-  TARGETED_SUBSTANCE: 30,
+  NOT_CONTROLLED:    365,  // Standard Rx drugs: 1-year supply permissible in most provinces
+  SCHEDULE_I:         30,  // Narcotics (opioids, etc.) — NCR / Health Canada limit
+  SCHEDULE_II:        30,  // Restricted drugs — same limit as Schedule I
+  SCHEDULE_III:       90,  // Amphetamine precursors — 3-month supply max
+  SCHEDULE_IV:        30,  // Benzodiazepines / targeted substances (SOR/2000-217)
+  TARGETED_SUBSTANCE: 30,  // Same as Schedule IV
 };
 
 /**

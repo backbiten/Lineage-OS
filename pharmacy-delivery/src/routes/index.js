@@ -1,4 +1,32 @@
 'use strict';
+/**
+ * @file routes/index.js
+ * @description API route definitions — maps HTTP methods+paths to controller
+ * functions and composes the middleware chain for each endpoint.
+ *
+ * Every protected route follows this pattern:
+ *   authenticate → [role guard] → [license check] → [CDSA check] → controller
+ *
+ * The middleware ordering is intentional and must not be changed:
+ *  1. authenticate:              verify JWT, load user from DB
+ *  2. role guard (isX):          check user.role is permitted
+ *  3. requireActiveLicense:      verify college license is current (RPh/RPhT only)
+ *  4. requireCDSAAuthorization:  verify cdsa_authorised flag (controlled Rxs only)
+ *  5. input validation:          express-validator rules (where applicable)
+ *  6. controller function:       business logic
+ *
+ * ─── Workflow route summary ──────────────────────────────────────────────────
+ *  POST /prescriptions/intake          RPhT+ — Step 1: technician intake
+ *  POST /prescriptions/:id/verify      RPh   — Step 2: pharmacist verification
+ *  POST /prescriptions/:id/narcotic-count  RPhT+CDSA — Step 3: double-count
+ *  POST /delivery/orders               RPhT+ — Step 4: pack & create delivery order
+ *  POST /delivery/orders/:id/assign-driver  RPh — assign eligible driver
+ *  POST /delivery/orders/:id/pickup    Driver — Step 5: pickup confirmation
+ *  POST /delivery/orders/:id/attempt   Driver — Step 6: delivery attempt
+ *  GET  /audit/log                     RPh/Auditor — regulatory inspection
+ *  GET  /inventory/transactions        RPhT+ — perpetual inventory view
+ * ────────────────────────────────────────────────────────────────────────────
+ */
 
 const { Router } = require('express');
 const router     = Router();
@@ -130,18 +158,24 @@ router.get(
 );
 
 // ── Audit log (regulatory inspectors / managers) ──────────────────────────────
+// Accessible by: PHARMACIST, PHARMACY_MANAGER, SYSTEM_ADMIN, REGULATORY_AUDITOR
+// Supports filtering by resource, actor, date range, and controlled-substance flag.
+// The act of reading the audit log is itself logged (meta-audit) for accountability.
+// Results capped at 500 rows per request; use pagination for larger exports.
 router.get('/audit/log', authenticate, canReadAudit, async (req, res) => {
   const { resource_type, resource_id, from, to, actor_id, controlled_only } = req.query;
 
-  const conditions = ['1=1'];
+  // Build parameterised WHERE clause dynamically from optional query params
+  const conditions = ['1=1']; // always-true base keeps concat logic simple
   const params     = [];
-  let   idx        = 1;
+  let   idx        = 1;       // $1, $2, … placeholder counter
 
   if (resource_type) { conditions.push(`resource_type = $${idx++}`); params.push(resource_type); }
   if (resource_id)   { conditions.push(`resource_id   = $${idx++}`); params.push(resource_id);   }
   if (actor_id)      { conditions.push(`actor_id      = $${idx++}`); params.push(actor_id);      }
   if (from)          { conditions.push(`event_time   >= $${idx++}`); params.push(from);          }
   if (to)            { conditions.push(`event_time   <= $${idx++}`); params.push(to);            }
+  // Shortcut for Health Canada / College inspectors reviewing controlled substance events only
   if (controlled_only === 'true') { conditions.push('is_controlled_substance_event = TRUE');     }
 
   const { rows } = await pool.query(
@@ -163,6 +197,10 @@ router.get('/audit/log', authenticate, canReadAudit, async (req, res) => {
 });
 
 // ── Inventory (controlled substance perpetual inventory) ──────────────────────
+// NCR s.35 requires that every narcotic transaction be recorded and available
+// for inspection.  This endpoint exposes the inventory_transactions table
+// for a given pharmacy, with optional drug and date-range filters.
+// Accessing this data is itself logged as a controlled-substance audit event.
 router.get('/inventory/transactions', authenticate, isTechOrAbove, async (req, res) => {
   const { pharmacy_id, drug_id, from, to } = req.query;
   const { rows } = await pool.query(`

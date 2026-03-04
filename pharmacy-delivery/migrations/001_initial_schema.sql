@@ -634,26 +634,41 @@ CREATE TABLE cold_chain_logs (
 
 -- ============================================================
 -- INDEXES
+-- Rationale noted inline so future developers understand why each index exists.
 -- ============================================================
 
+-- Prescriptions: patient lookup (patient portal, delivery linking)
 CREATE INDEX idx_prescriptions_patient    ON prescriptions(patient_id);
+-- Work queues (technician/pharmacist) filter heavily on status
 CREATE INDEX idx_prescriptions_status     ON prescriptions(status);
+-- Rx number is displayed to users and frequently searched
 CREATE INDEX idx_prescriptions_rx_number  ON prescriptions(rx_number);
+-- Partial index: controlled-substance reporting queries only need this subset
 CREATE INDEX idx_prescriptions_controlled ON prescriptions(is_controlled) WHERE is_controlled = TRUE;
+-- Delivery orders: patient view and driver routing
 CREATE INDEX idx_delivery_orders_patient  ON delivery_orders(patient_id);
 CREATE INDEX idx_delivery_orders_driver   ON delivery_orders(driver_id);
+-- Status index: active-delivery queries use this constantly
 CREATE INDEX idx_delivery_orders_status   ON delivery_orders(status);
+-- Audit log: inspector queries by actor (who did what) and by time range
 CREATE INDEX idx_audit_log_actor          ON audit_log(actor_id);
 CREATE INDEX idx_audit_log_time           ON audit_log(event_time);
+-- Audit log: drill-down from a specific record (e.g., all events on Rx #XYZ)
 CREATE INDEX idx_audit_log_resource       ON audit_log(resource_type, resource_id);
+-- Partial index: Health Canada inspectors filter to controlled-substance events only
 CREATE INDEX idx_audit_log_controlled     ON audit_log(is_controlled_substance_event) WHERE is_controlled_substance_event = TRUE;
+-- Perpetual inventory lookup (most queries are pharmacy + drug)
 CREATE INDEX idx_inventory_pharmacy_drug  ON inventory(pharmacy_id, drug_id);
+-- PMP retry job queries for PENDING submissions
 CREATE INDEX idx_pmp_submissions_pending  ON pmp_submissions(submission_status) WHERE submission_status = 'PENDING';
 
 -- ============================================================
 -- updated_at auto-update trigger
+-- Automatically keeps updated_at current on every UPDATE without requiring
+-- application code to remember to set it.  Applied to all mutable tables.
 -- ============================================================
 
+-- Function: sets NEW.updated_at = NOW() before any UPDATE operation
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -662,13 +677,23 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- DO block attaches the trigger to every table that has an updated_at column.
+-- Using format() + EXECUTE avoids repeating the CREATE TRIGGER statement 10 times.
+-- Note: audit_log is intentionally excluded — it is append-only (see immutability
+-- trigger above) and has no updated_at column.
 DO $$
 DECLARE
   t TEXT;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['pharmacies','users','professional_licenses','patients',
-    'prescribers','drugs','prescriptions','inventory','delivery_orders','delivery_drivers'] LOOP
-    EXECUTE format('CREATE TRIGGER trg_updated_at BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION set_updated_at()', t);
+  FOREACH t IN ARRAY ARRAY[
+    'pharmacies', 'users', 'professional_licenses', 'patients',
+    'prescribers', 'drugs', 'prescriptions', 'inventory',
+    'delivery_orders', 'delivery_drivers'
+  ] LOOP
+    EXECUTE format(
+      'CREATE TRIGGER trg_updated_at BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION set_updated_at()',
+      t
+    );
   END LOOP;
 END;
 $$;

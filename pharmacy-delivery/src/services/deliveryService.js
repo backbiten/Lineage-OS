@@ -1,33 +1,63 @@
 'use strict';
 /**
- * Delivery Service
+ * @file services/deliveryService.js
+ * @description Delivery lifecycle management — Steps 5 & 6 of the workflow.
  *
- * Regulatory basis:
- *  - Narcotic Control Regulations s.5 — carriers of controlled substances
- *    must be authorized (employed by a licensed pharmacy = authorization)
- *  - Health Canada Guidance: Delivery of Drugs (2023)
- *  - CDSA s.4 — possession of controlled substances
- *  - Provincial pharmacy acts on delivery obligations
- *  - Municipal bylaw compliance (local delivery regulations vary)
+ * Covers: driver assignment eligibility checks → pickup with seal verification
+ * → delivery attempt recording (success or failure handling).
  *
- * Key rules:
- *  1. Driver must be background-checked for controlled substance deliveries
- *  2. ID verification mandatory at door for controlled substances (CDSA s.4)
- *  3. Tamper-evident packaging must be intact on delivery
- *  4. Signature mandatory for all Rx deliveries
- *  5. Cold-chain medications: temperature logged throughout
- *  6. Failed delivery of controlled substance: returned to pharmacy same day
+ * ─── Regulatory basis ────────────────────────────────────────────────────────
+ *  NCR s.5 — Carriers:
+ *    A person who possesses a controlled substance for delivery is a "carrier".
+ *    A carrier employed by a licensed pharmacy is implicitly authorized under
+ *    the pharmacy's dealer's license.  However:
+ *    • The pharmacy is responsible for ensuring the carrier is a fit person
+ *    • A criminal record check is therefore mandatory for controlled deliveries
+ *    • The `can_deliver_controlled` flag is set by a pharmacist/manager after
+ *      reviewing the background check and completing training
+ *  CDSA s.4 — Possession:
+ *    Only authorized persons may possess controlled substances.  At the door,
+ *    the receiving patient must be POSITIVELY IDENTIFIED (government photo ID)
+ *    before the controlled substance changes hands.  If the patient cannot be
+ *    identified the controlled substance MUST be returned to the pharmacy —
+ *    it cannot be left with a third party or at the address.
+ *  Health Canada Guidance: Delivery of Drugs (2023):
+ *    • Tamper-evident packaging required
+ *    • Signature of recipient required for all Rx deliveries
+ *    • Cold chain maintained and logged for temperature-sensitive drugs
+ *  Provincial pharmacy acts — delivery obligations vary; see REGULATORY_FRAMEWORK.md
+ *  Municipal bylaws — delivery vehicle requirements vary by city
+ *
+ * ─── Key rules enforced ──────────────────────────────────────────────────────
+ *  1. Driver eligibility:  background check clear + CDSA training + license valid
+ *  2. Seal integrity:      tamper-evident seal checked before pickup AND on delivery
+ *  3. ID verification:     MANDATORY for controlled substances (CDSA s.4)
+ *  4. Signature:           MANDATORY for all Rx deliveries
+ *  5. Cold chain:          temperature logged per delivery attempt
+ *  6. Failed delivery (controlled): returned to pharmacy SAME DAY — no exceptions
+ * ────────────────────────────────────────────────────────────────────────────
  */
 
 const pool     = require('../config/database');
 const { writeAuditEvent } = require('../utils/audit');
 
 /**
- * Assign a driver to a delivery order.
- * Only pharmacy manager / pharmacist can assign a driver.
+ * assignDriver — assigns a delivery driver to an order after eligibility checks.
+ *
+ * Called by pharmacy manager/pharmacist after the order is packed (status = PACKING).
+ * Performs the following checks before assignment:
+ *  1. Driver account is active (not deactivated or suspended)
+ *  2. Driver's provincial license has not expired
+ *  3. For controlled substance orders: driver has the `can_deliver_controlled` flag
+ *     (set by a pharmacist/manager after background check and CDSA training)
+ *  4. For controlled substance orders: criminal record check on file and clear
+ *
+ * @param {string} opts.deliveryOrderId - UUID of the delivery_orders row
+ * @param {string} opts.driverId        - UUID of the driver's users row
+ * @param {object} opts.req             - Express request (for audit)
  */
 async function assignDriver({ deliveryOrderId, driverId, req }) {
-  // Verify driver is eligible (background check + license active)
+  // Load driver with user account join to check both is_active flags
   const { rows: [driver] } = await pool.query(
     `SELECT dd.*, u.is_active
      FROM delivery_drivers dd
@@ -54,7 +84,7 @@ async function assignDriver({ deliveryOrderId, driverId, req }) {
     throw err;
   }
 
-  // Check if order contains controlled substances — driver must be authorised
+  // Load the order to determine whether controlled-substance rules apply
   const { rows: [order] } = await pool.query(
     'SELECT id, contains_controlled, contains_narcotic FROM delivery_orders WHERE id = $1',
     [deliveryOrderId]
@@ -263,7 +293,10 @@ async function recordDeliveryAttempt({
       `, [deliveryOrderId]);
 
     } else if (['NO_ANSWER','WRONG_ADDRESS','REFUSED','ID_VERIFICATION_FAILED','SIGNATURE_REFUSED'].includes(result)) {
-      // Controlled substance: CANNOT leave unattended, must return
+      // Failed delivery path.
+      // Controlled substances CANNOT be left unattended or handed to an
+      // unidentified third party — CDSA s.4 / NCR.  Must return to pharmacy
+      // on the same shift.  Non-controlled Rxs allow up to 3 attempts.
       if (order.contains_controlled) {
         newStatus = 'RETURNED_TO_PHARMACY';
         await client.query(`
@@ -284,7 +317,11 @@ async function recordDeliveryAttempt({
       }
     }
 
-    // Cold chain log
+    // Record temperature at time of delivery attempt.
+    // Refrigerated drugs (biologics, insulin, some vaccines) require 2–8 °C.
+    // An excursion outside this range may require the drug to be discarded
+    // (Health Canada Drug Regulations — storage requirements).
+    // in_range uses the standard refrigerated range; adjust if drug has different needs.
     if (tempCelsius !== undefined && tempCelsius !== null) {
       await client.query(`
         INSERT INTO cold_chain_logs (delivery_order_id, temp_celsius, in_range)

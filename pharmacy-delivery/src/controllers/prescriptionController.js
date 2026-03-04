@@ -1,4 +1,20 @@
 'use strict';
+/**
+ * @file controllers/prescriptionController.js
+ * @description HTTP handlers for the prescription workflow (Steps 1–3).
+ *
+ * Route → Service mapping:
+ *   POST /intake          → technicianIntake()           (Step 1 — RPhT)
+ *   POST /:id/verify      → pharmacistVerify()           (Step 2 — RPh, mandatory)
+ *   POST /:id/narcotic-count → recordNarcoticDoubleCount() (Step 3 — CDSA)
+ *
+ * Controllers are intentionally thin — they handle HTTP concerns (request
+ * parsing, input validation, response formatting) and delegate all business
+ * logic and regulatory enforcement to the service layer.
+ *
+ * Input validation (express-validator) runs before any service call so that
+ * malformed requests are rejected with a 422 before touching the database.
+ */
 
 const pool     = require('../config/database');
 const { technicianIntake, technicianPackAndCreateDelivery } = require('../services/technicianWorkflow');

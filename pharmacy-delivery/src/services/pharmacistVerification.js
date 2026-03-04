@@ -1,17 +1,31 @@
 'use strict';
 /**
- * Pharmacist Verification Service
+ * @file services/pharmacistVerification.js
+ * @description Pharmacist clinical verification service — Step 2 of the workflow.
  *
- * Regulatory basis:
- *  - CDSA s.31(1): pharmacist bears professional responsibility for all dispensed Rxs
- *  - Narcotic Control Regulations s.31: pharmacist final check mandatory for narcotics
- *  - NAPRA Standards — pharmacist provides final verification (cannot be delegated)
- *  - Food and Drugs Act s.9: patient counselling obligation
- *  - Provincial pharmacy acts — professional liability
+ * This module enforces the most critical regulatory requirement in the platform:
+ * NO prescription — and especially NO controlled substance prescription — may
+ * advance to dispensing or delivery without explicit pharmacist sign-off.
  *
- * CRITICAL DESIGN RULE:
- *   No controlled substance Rx may proceed to dispensing/delivery without
- *   pharmacist sign-off. This is enforced at both service and DB level.
+ * ─── Regulatory basis ────────────────────────────────────────────────────────
+ *  CDSA s.31(1):
+ *    The pharmacist bears professional responsibility for all dispensed Rxs.
+ *    This cannot be delegated to a technician.
+ *  NCR s.31:
+ *    Pharmacist must perform the final check on narcotic prescriptions and
+ *    confirm the original written Rx is on file before dispensing.
+ *  NAPRA Model Standards s.3.0:
+ *    Pharmacist provides final verification — this step is not delegatable.
+ *  Food and Drugs Act s.9 / s.29.1:
+ *    Patient must receive counselling on drug therapy from the pharmacist.
+ *  Provincial pharmacy acts:
+ *    Pharmacist is personally liable for any dispensing error.
+ *
+ * ─── Critical design rule ────────────────────────────────────────────────────
+ *  The pharmacistVerify() function is the ONLY path by which a prescription
+ *  can transition to APPROVED status.  The DB schema and application layer both
+ *  enforce this.  There is no "bypass" or "emergency override" route.
+ * ────────────────────────────────────────────────────────────────────────────
  */
 
 const pool     = require('../config/database');
@@ -77,7 +91,10 @@ async function pharmacistVerify({ prescriptionId, decision, req }) {
   try {
     await client.query('BEGIN');
 
-    // Compute a simple signature hash (in production: integrate with PKI/e-signature)
+    // Produce an HMAC-SHA256 "digital signature" binding the pharmacist's ID to
+    // this prescription at this exact timestamp.  In a full production system
+    // this should integrate with a PKI/HSM for legally non-repudiable e-signatures
+    // (e.g., via Health Canada's eSignature framework or provincial equivalent).
     const crypto = require('crypto');
     const sigPayload = `${pharmacistId}|${prescriptionId}|${Date.now()}`;
     const signatureHash = crypto
@@ -85,7 +102,8 @@ async function pharmacistVerify({ prescriptionId, decision, req }) {
       .update(sigPayload)
       .digest('hex');
 
-    // Record pharmacist verification
+    // Write the formal verification record — this is the legally significant
+    // document that proves the pharmacist reviewed and approved/rejected the Rx
     await client.query(`
       INSERT INTO pharmacist_verification_log (
         prescription_id, pharmacist_id,
@@ -139,10 +157,14 @@ async function pharmacistVerify({ prescriptionId, decision, req }) {
     client.release();
   }
 
-  // Provincial Drug Monitoring Program — submit BEFORE dispensing (real-time provinces)
+  // For drugs requiring real-time PMP reporting (e.g., all Rxs in BC via PharmaNet,
+  // narcotics in ON/MB/AB/NS), submit to the provincial program immediately after
+  // approval.  We use .catch() so a PMP outage does NOT prevent dispensing —
+  // instead, a CRITICAL audit event is written and the pharmacy is expected to
+  // manually resubmit (pmp_submissions table tracks pending submissions).
   if (decision.approved && rx.requires_real_time_monitoring) {
     await submitToPMP({ prescriptionId, provinceCode: rx.province_code }).catch(err => {
-      // Log but don't block — pharmacist must be alerted
+      // Log failure as controlled-substance event; ops team must investigate
       writeAuditEvent({
         action: 'PMP_SUBMISSION_FAILED',
         req,
@@ -174,14 +196,25 @@ async function pharmacistVerify({ prescriptionId, decision, req }) {
 }
 
 /**
- * Narcotic double-count verification.
- * CDSA / NCR — two licensed staff must verify count of controlled substance
- * removed from inventory before dispensing.
+ * recordNarcoticDoubleCount — records the mandatory two-person count of a
+ * controlled substance quantity before it is removed from inventory for dispensing.
  *
- * @param {object} opts.prescriptionId
- * @param {object} opts.countedQty
- * @param {object} opts.witness2Id - second licensed staff UUID
- * @param {object} opts.req
+ * Legal basis:
+ *   CDSA s.55(1)(f) / NCR s.35: all narcotic dispensing transactions must be
+ *   recorded with quantity, date, and identity of persons who handled the drug.
+ *   Standard practice requires TWO independent staff members to count and agree
+ *   before any controlled substance is removed from the vault/safe.
+ *
+ * Discrepancy handling:
+ *   If the counted quantity does not match the prescribed quantity (within 0.001
+ *   tolerance for rounding), dispensing is HALTED and a NARCOTIC_COUNT_DISCREPANCY
+ *   event is written to the immutable audit log.  The pharmacist must investigate
+ *   and reconcile the perpetual inventory before proceeding.
+ *
+ * @param {string} opts.prescriptionId - UUID of the prescription to count for
+ * @param {number} opts.countedQty     - quantity physically counted by counter1
+ * @param {string} opts.witness2Id     - UUID of the second licensed witness
+ * @param {object} opts.req            - Express request (counter1 is req.user)
  */
 async function recordNarcoticDoubleCount({ prescriptionId, countedQty, witness2Id, req }) {
   const counter1Id = req.user.id;
@@ -197,6 +230,7 @@ async function recordNarcoticDoubleCount({ prescriptionId, countedQty, witness2I
     throw err;
   }
 
+  // 0.001 tolerance handles floating-point rounding in tablet/liquid measurements
   if (Math.abs(countedQty - rx.quantity_prescribed) > 0.001) {
     await writeAuditEvent({
       action: 'NARCOTIC_COUNT_DISCREPANCY',

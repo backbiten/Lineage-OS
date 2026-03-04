@@ -1,4 +1,19 @@
 'use strict';
+/**
+ * @file controllers/deliveryController.js
+ * @description HTTP handlers for the delivery workflow (Steps 4–6).
+ *
+ * Route → Service mapping:
+ *   POST /orders                    → technicianPackAndCreateDelivery() (Step 4 — RPhT)
+ *   POST /orders/:id/assign-driver  → assignDriver()                   (RPh/Manager)
+ *   POST /orders/:id/pickup         → driverPickup()                   (Step 5 — Driver)
+ *   POST /orders/:id/attempt        → recordDeliveryAttempt()          (Step 6 — Driver)
+ *
+ * Patient data access:
+ *   Patients may only view their OWN delivery orders.  A sub-query confirms
+ *   the requesting patient's UUID matches the order's patient_id before
+ *   returning any data (access control enforced at controller level, not just role).
+ */
 
 const { assignDriver, driverPickup, recordDeliveryAttempt } = require('../services/deliveryService');
 const { technicianPackAndCreateDelivery } = require('../services/technicianWorkflow');

@@ -65,15 +65,19 @@ async function technicianIntake({ rx, drug, patient, prescriber, pharmacy, req }
     throw err;
   }
 
-  const rxNumber = rx.rx_number || generateRxNumber(pharmacy.id);
+  // Use a provided Rx number (e.g., from paper Rx) or generate one locally
+  const rxNumber     = rx.rx_number || generateRxNumber(pharmacy.id);
   const isControlled = drug.cdsa_schedule !== 'NOT_CONTROLLED';
   const isNarcotic   = drug.is_narcotic;
 
+  // Use a manual transaction so that the prescription row and the intake log
+  // row are always created together — or neither is (atomicity).
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Insert prescription
+    // Create the prescription record (status = TECHNICIAN_REVIEW so it lands
+    // in both the technician queue and, after routing, the pharmacist queue)
     const { rows: [prescription] } = await client.query(`
       INSERT INTO prescriptions (
         rx_number, patient_id, prescriber_id, pharmacy_id, drug_id,
@@ -102,7 +106,9 @@ async function technicianIntake({ rx, drug, patient, prescriber, pharmacy, req }
       technicianId,
     ]);
 
-    // Insert intake checklist log
+    // Record the technician's intake checklist (NAPRA s.3.0).
+    // This is the formal record that the RPhT completed each required step.
+    // requires_pharmacist_review is ALWAYS true — there are no exceptions.
     await client.query(`
       INSERT INTO technician_intake_log (
         prescription_id, technician_id,
@@ -284,10 +290,20 @@ async function technicianPackAndCreateDelivery({ prescriptionIds, deliveryDetail
   }
 }
 
-// Generate unique Rx number — format: PHARMACY_PREFIX-YYYYMMDD-SEQUENCE
+/**
+ * generateRxNumber — creates a unique Rx tracking number for internally
+ * originated prescriptions (e.g., electronic transfer cases where no paper
+ * Rx number exists).
+ *
+ * Format: {4-char pharmacy UUID prefix}-{YYYYMMDD}-{5-digit sequence}
+ * Example: A3F2-20260304-04721
+ *
+ * NOTE: For narcotics the original paper Rx number should be used wherever
+ * possible and stored in rx_paper_id for traceability.
+ */
 function generateRxNumber(pharmacyId) {
-  const prefix = pharmacyId.slice(0, 4).toUpperCase();
-  const date   = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const prefix = pharmacyId.slice(0, 4).toUpperCase();  // e.g. "A3F2"
+  const date   = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // "20260304"
   const seq    = Math.floor(Math.random() * 99999).toString().padStart(5, '0');
   return `${prefix}-${date}-${seq}`;
 }

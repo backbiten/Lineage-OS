@@ -24,15 +24,20 @@
 const pool   = require('../config/database');
 const logger = require('../utils/logger');
 
-// Province → PMP config mapping
+// Province → PMP configuration map.
+// `required: true` means the submission is MANDATORY before dispensing
+// (BC PharmaNet applies to ALL prescriptions, not just controlled substances).
+// `required: false` means the submission is required for narcotics/targeted
+// substances only — if the endpoint isn't configured the app logs a warning
+// rather than blocking dispensing, but the pharmacy must resolve this.
 const PMP_CONFIG = {
-  BC: { name: 'PharmaNet', endpoint: process.env.PMP_BC_ENDPOINT,   required: true  },
-  ON: { name: 'Intellihealth', endpoint: process.env.PMP_ON_ENDPOINT, required: false }, // controlled only
-  MB: { name: 'DPIN',      endpoint: process.env.PMP_MB_ENDPOINT,   required: false },
-  AB: { name: 'Netcare',   endpoint: process.env.PMP_AB_ENDPOINT,   required: false },
-  NS: { name: 'DPMB',      endpoint: process.env.PMP_NS_ENDPOINT,   required: false },
-  QC: { name: 'RAMQ',      endpoint: process.env.PMP_QC_ENDPOINT,   required: false },
-  SK: { name: 'SKDrugPlan', endpoint: process.env.PMP_SK_ENDPOINT,  required: false },
+  BC: { name: 'PharmaNet',   endpoint: process.env.PMP_BC_ENDPOINT,  required: true  }, // ALL Rxs
+  ON: { name: 'Intellihealth', endpoint: process.env.PMP_ON_ENDPOINT, required: false }, // controlled/targeted only
+  MB: { name: 'DPIN',        endpoint: process.env.PMP_MB_ENDPOINT,  required: false },
+  AB: { name: 'Netcare',     endpoint: process.env.PMP_AB_ENDPOINT,  required: false },
+  NS: { name: 'DPMB',        endpoint: process.env.PMP_NS_ENDPOINT,  required: false },
+  QC: { name: 'RAMQ',        endpoint: process.env.PMP_QC_ENDPOINT,  required: false },
+  SK: { name: 'SKDrugPlan',  endpoint: process.env.PMP_SK_ENDPOINT,  required: false },
 };
 
 /**
@@ -74,25 +79,33 @@ async function submitToPMP({ prescriptionId, provinceCode }) {
 
   if (!rx) throw new Error(`Prescription ${prescriptionId} not found for PMP submission`);
 
-  // In production: format as HL7 FHIR MedicationDispense or province-specific format
-  // and POST to config.endpoint with province-issued API credentials
+  // Build the submission payload.
+  // BC PharmaNet uses a proprietary XML/JSON format; other provinces vary.
+  // Most are moving toward HL7 FHIR R4 MedicationDispense resources.
+  // The payload structure below captures the mandatory fields common to all;
+  // province-specific mapping must be applied in the HTTP client layer.
+  //
+  // IMPORTANT: patientHCN is PHI — it is transmitted ONLY over TLS to the
+  // province-owned authorized endpoint.  It must never appear in application
+  // logs (PIPEDA / PHIPA).
   const payload = {
-    pharmacyLicense:    rx.pharmacy_license,
-    prescriptionDate:   rx.written_date,
-    dispensedDate:      new Date().toISOString().slice(0, 10),
-    din:                rx.din,
-    drugName:           rx.generic_name,
-    quantity:           rx.quantity_prescribed,
-    daysSupply:         rx.days_supply,
-    prescriberReg:      rx.college_registration,
-    patientHCN:         rx.health_card_number,  // sent over TLS to authorized endpoint only
-    patientDOB:         rx.date_of_birth,
-    cdsaSchedule:       rx.cdsa_schedule,
+    pharmacyLicense:  rx.pharmacy_license,  // Pharmacy's provincial license number
+    prescriptionDate: rx.written_date,       // Date Rx was written by prescriber
+    dispensedDate:    new Date().toISOString().slice(0, 10), // Today
+    din:              rx.din,                // Health Canada Drug Identification Number
+    drugName:         rx.generic_name,
+    quantity:         rx.quantity_prescribed,
+    daysSupply:       rx.days_supply,
+    prescriberReg:    rx.college_registration, // Prescriber's college registration #
+    patientHCN:       rx.health_card_number,   // PHI — TLS only, never logged
+    patientDOB:       rx.date_of_birth,
+    cdsaSchedule:     rx.cdsa_schedule,
   };
 
   logger.info(`PMP submission to ${config.name} (${provinceCode})`, { prescriptionId });
 
-  // TODO: Replace with actual HTTP POST to province endpoint
+  // TODO: Replace with actual HTTP POST to province endpoint.
+  // Integrate with province-issued API credentials (stored in env / secrets manager).
   // const response = await httpClient.post(config.endpoint, payload, { headers: { Authorization: `Bearer ${PMP_TOKEN}` } });
 
   // Record submission
