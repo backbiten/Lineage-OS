@@ -1,0 +1,43 @@
+{
+  "name": "pharmacy-delivery-backend",
+  "version": "1.0.0",
+  "description": "Regulated pharmacy-to-patient delivery platform — compliant with CDSA, Food and Drugs Act, Health Canada policies, PIPEDA/PHIPA, and applicable provincial pharmacy acts",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "migrate": "node migrations/run.js",
+    "test": "jest --forceExit --runInBand",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.3",
+    "express-rate-limit": "^7.2.0",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "pg": "^8.11.5",
+    "pg-pool": "^3.6.2",
+    "uuid": "^9.0.1",
+    "winston": "^3.13.0",
+    "winston-daily-rotate-file": "^5.0.0",
+    "nodemailer": "^6.9.13",
+    "crypto": "^1.0.1",
+    "express-async-errors": "^3.1.1"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.0",
+    "supertest": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "PROPRIETARY"
+}
