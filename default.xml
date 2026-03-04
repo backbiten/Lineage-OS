@@ -366,7 +366,8 @@
   <project path="external/lzma" name="platform/external/lzma" groups="pdk" remote="aosp" />
   <project path="external/marisa-trie" name="platform/external/marisa-trie" groups="pdk" remote="aosp" />
   <!-- SECURITY AUDIT 2026-03-04: Mbed TLS — HIGH RISK if version < 3.6.4.
-       Known CVEs: CVE-2024-23170 (RSA timing), CVE-2024-45159 (TLS1.3 auth bypass),
+       Known CVEs: CVE-2024-49195 (CRITICAL 9.8, pkwrite buffer underrun, fixed 3.6.2),
+       CVE-2024-23170 (RSA timing/Marvin), CVE-2024-45159 (TLS1.3 auth bypass),
        CVE-2025-27809 (server impersonation), CVE-2025-49600 (LMS sig bypass),
        CVE-2025-49601 (OOB read). ACTION REQUIRED: verify version, fork if < 3.6.4.
        See ssl-tls-security-audit.md. -->

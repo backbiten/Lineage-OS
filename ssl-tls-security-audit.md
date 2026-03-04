@@ -77,6 +77,7 @@ prior to 3.6.4/3.6.5.
 
 | CVE | Severity | Description | Fixed In |
 |---|---|---|---|
+| CVE-2024-49195 | **CRITICAL (CVSS 9.8)** | Buffer underrun in `pkwrite` when writing an opaque key pair. Affects Mbed TLS 3.5.x–3.6.x before 3.6.2. | 3.6.2 |
 | CVE-2024-23170 | HIGH | Timing side-channel in RSA private key operations (Marvin Attack). Remote attacker with precise timing may recover plaintext. | 3.5.2 / 2.28.7 |
 | CVE-2024-45159 | MEDIUM | TLS 1.3 optional client authentication bypass. Certificate valid for other purposes accepted for client auth. | 3.6.x |
 | CVE-2025-27809 | HIGH | Server impersonation risk when `mbedtls_ssl_set_hostname()` is not called. Library now blocks handshake with new error code. | 3.6.x |
