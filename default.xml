@@ -98,6 +98,8 @@
   <project path="external/bc" name="platform/external/bc" groups="pdk" remote="aosp" />
   <project path="external/bcc" name="platform/external/bcc" groups="pdk" remote="aosp" />
   <project path="external/blktrace" name="platform/external/blktrace" groups="pdk" remote="aosp" />
+  <!-- SECURITY AUDIT 2026-03-04: BoringSSL — no standalone CVEs; monitor Android Security Bulletins.
+       Missing patches from SPL 2025-08-01 through 2026-03-05. See ssl-tls-security-audit.md. -->
   <project path="external/boringssl" name="platform/external/boringssl" groups="pdk" remote="aosp" />
   <project path="external/bouncycastle" name="platform/external/bouncycastle" groups="pdk" remote="aosp" />
   <project path="external/bpftool" name="platform/external/bpftool" groups="pdk" remote="aosp" />
@@ -122,6 +124,8 @@
   <project path="external/compiler-rt" name="platform/external/compiler-rt" groups="pdk" remote="aosp" />
   <project path="external/ComputeLibrary" name="platform/external/ComputeLibrary" groups="pdk-lassen,pdk-gs-arm" remote="aosp" />
   <project path="external/connectedappssdk" name="platform/external/connectedappssdk" groups="pdk" remote="aosp" />
+  <!-- SECURITY AUDIT 2026-03-04: Conscrypt — backed by BoringSSL; no standalone CVEs.
+       Ensure prebuilts/module_sdk/conscrypt stays in sync. See ssl-tls-security-audit.md. -->
   <project path="external/conscrypt" name="platform/external/conscrypt" groups="pdk" remote="aosp" />
   <project path="external/cpu_features" name="platform/external/cpu_features" groups="pdk" remote="aosp" />
   <project path="external/cpuinfo" name="platform/external/cpuinfo" groups="pdk" remote="aosp" />
@@ -361,6 +365,12 @@
   <project path="external/lz4" name="platform/external/lz4" groups="pdk" remote="aosp" />
   <project path="external/lzma" name="platform/external/lzma" groups="pdk" remote="aosp" />
   <project path="external/marisa-trie" name="platform/external/marisa-trie" groups="pdk" remote="aosp" />
+  <!-- SECURITY AUDIT 2026-03-04: Mbed TLS — HIGH RISK if version < 3.6.4.
+       Known CVEs: CVE-2024-49195 (CRITICAL 9.8, pkwrite buffer underrun, fixed 3.6.2),
+       CVE-2024-23170 (RSA timing/Marvin), CVE-2024-45159 (TLS1.3 auth bypass),
+       CVE-2025-27809 (server impersonation), CVE-2025-49600 (LMS sig bypass),
+       CVE-2025-49601 (OOB read). ACTION REQUIRED: verify version, fork if < 3.6.4.
+       See ssl-tls-security-audit.md. -->
   <project path="external/mbedtls" name="platform/external/mbedtls" groups="pdk" remote="aosp" />
   <project path="external/mdnsresponder" name="platform/external/mdnsresponder" groups="pdk" remote="aosp" />
   <project path="external/mesa3d" name="platform/external/mesa3d" groups="pdk-cw-fs,pdk-fs" remote="aosp" />
@@ -491,6 +501,11 @@
   <project path="external/rnnoise" name="platform/external/rnnoise" groups="pdk" remote="aosp" />
   <project path="external/rust/android-crates-io" name="platform/external/rust/android-crates-io" groups="pdk" remote="aosp" />
   <project path="external/rust/crabbyavif" name="platform/external/rust/crabbyavif" groups="pdk" remote="aosp" />
+  <!-- SECURITY AUDIT 2026-03-04: Rust openssl crate — HIGH RISK if crate version < 0.10.72.
+       RUSTSEC-2025-0004 (CVE-2025-0977): use-after-free in ssl::select_next_proto (fixed 0.10.70).
+       RUSTSEC-2025-0022: use-after-free in Md::fetch/Cipher::fetch (fixed 0.10.72).
+       Underlying OpenSSL: CVE-2025-15467 (critical RCE in CMS parsing, OpenSSL 3.x only).
+       ACTION REQUIRED: run cargo audit; update crate if < 0.10.72. See ssl-tls-security-audit.md. -->
   <project path="external/rust/crates/openssl" name="platform/external/rust/crates/openssl" groups="pdk" remote="aosp" />
   <project path="external/rust/crates/v4l2r" name="platform/external/rust/crates/v4l2r" groups="pdk" remote="aosp" />
   <project path="external/rust/crates/vhost-device-vsock" name="platform/external/rust/crates/vhost-device-vsock" groups="pdk" remote="aosp" />
@@ -855,6 +870,8 @@
   <project path="prebuilts/module_sdk/AdServices" name="platform/prebuilts/module_sdk/AdServices" groups="pdk" clone-depth="1" remote="aosp" />
   <project path="prebuilts/module_sdk/AppSearch" name="platform/prebuilts/module_sdk/AppSearch" groups="pdk" clone-depth="1" remote="aosp" />
   <project path="prebuilts/module_sdk/Bluetooth" name="platform/prebuilts/module_sdk/Bluetooth" groups="pdk" clone-depth="1" remote="aosp" />
+  <!-- SECURITY AUDIT 2026-03-04: Prebuilt Conscrypt SDK — must stay in sync with external/conscrypt.
+       See ssl-tls-security-audit.md. -->
   <project path="prebuilts/module_sdk/conscrypt" name="platform/prebuilts/module_sdk/conscrypt" groups="pdk" clone-depth="1" remote="aosp" />
   <project path="prebuilts/module_sdk/ConfigInfrastructure" name="platform/prebuilts/module_sdk/ConfigInfrastructure" groups="pdk" clone-depth="1" remote="aosp" />
   <project path="prebuilts/module_sdk/Connectivity" name="platform/prebuilts/module_sdk/Connectivity" groups="pdk" clone-depth="1" remote="aosp" />
