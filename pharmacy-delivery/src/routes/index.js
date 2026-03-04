@@ -45,6 +45,10 @@ const {
 const authCtrl         = require('../controllers/authController');
 const prescriptionCtrl = require('../controllers/prescriptionController');
 const deliveryCtrl     = require('../controllers/deliveryController');
+const patientCtrl      = require('../controllers/patientController');
+const driverCtrl       = require('../controllers/driverController');
+const drugCtrl         = require('../controllers/drugController');
+const coldChainCtrl    = require('../controllers/coldChainController');
 const pool             = require('../config/database');
 const { writeAuditEvent } = require('../utils/audit');
 
@@ -223,5 +227,147 @@ router.get('/inventory/transactions', authenticate, isTechOrAbove, async (req, r
 
   res.json({ transactions: rows });
 });
+
+// ── Patient portal ────────────────────────────────────────────────────────────
+
+// Public registration — no auth required
+router.post(
+  '/patients/register',
+  ...patientCtrl.registerValidation,
+  patientCtrl.register
+);
+
+// Patient self-service (authenticated patient only)
+router.get(
+  '/patients/me',
+  authenticate,
+  patientCtrl.getProfile
+);
+
+router.patch(
+  '/patients/me',
+  authenticate,
+  ...patientCtrl.updateProfileValidation,
+  patientCtrl.updateProfile
+);
+
+router.get(
+  '/patients/me/prescriptions',
+  authenticate,
+  patientCtrl.myPrescriptions
+);
+
+router.get(
+  '/patients/me/deliveries',
+  authenticate,
+  patientCtrl.myDeliveries
+);
+
+router.post(
+  '/patients/me/refill-requests',
+  authenticate,
+  ...patientCtrl.refillValidation,
+  patientCtrl.requestRefill
+);
+
+// ── Driver management ─────────────────────────────────────────────────────────
+
+// Manager/Admin registers a new driver
+router.post(
+  '/drivers/register',
+  authenticate,
+  isAdmin,
+  ...driverCtrl.registerDriverValidation,
+  driverCtrl.registerDriver
+);
+
+// List drivers for a pharmacy (Manager/Admin)
+router.get(
+  '/drivers',
+  authenticate,
+  isPharmacist,
+  driverCtrl.listDrivers
+);
+
+// Driver detail
+router.get(
+  '/drivers/:id',
+  authenticate,
+  isPharmacist,
+  driverCtrl.getDriver
+);
+
+// Record background check result (Manager/Admin)
+router.post(
+  '/drivers/:id/background-check',
+  authenticate,
+  isPharmacist,
+  ...driverCtrl.backgroundCheckValidation,
+  driverCtrl.recordBackgroundCheck
+);
+
+// CDSA controlled-delivery authorization (Pharmacist / Manager)
+router.post(
+  '/drivers/:id/cdsa-authorization',
+  authenticate,
+  isPharmacist,
+  ...driverCtrl.cdsaAuthValidation,
+  driverCtrl.setCdsaAuthorization
+);
+
+// Activate / deactivate driver
+router.patch(
+  '/drivers/:id/status',
+  authenticate,
+  isAdmin,
+  driverCtrl.setDriverStatus
+);
+
+// ── Drug search & lookup ──────────────────────────────────────────────────────
+
+router.get(
+  '/drugs',
+  authenticate,
+  ...drugCtrl.searchValidation,
+  drugCtrl.searchDrugs
+);
+
+router.get(
+  '/drugs/din/:din',
+  authenticate,
+  drugCtrl.getDrugByDin
+);
+
+router.get(
+  '/drugs/:id',
+  authenticate,
+  drugCtrl.getDrugById
+);
+
+// Inventory for a specific drug (staff only)
+router.get(
+  '/drugs/:id/inventory',
+  authenticate,
+  isTechOrAbove,
+  drugCtrl.getDrugInventory
+);
+
+// ── Cold chain monitoring ─────────────────────────────────────────────────────
+
+// Driver or IoT sensor posts a temperature reading
+router.post(
+  '/cold-chain/log',
+  authenticate,
+  ...coldChainCtrl.logTempValidation,
+  coldChainCtrl.logTemperature
+);
+
+// Retrieve temperature log for a delivery order (staff)
+router.get(
+  '/cold-chain/:delivery_order_id/log',
+  authenticate,
+  isTechOrAbove,
+  coldChainCtrl.getTempLog
+);
 
 module.exports = router;
